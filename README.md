@@ -7,22 +7,25 @@ Fast filesystem time base organizer, it move files based on time month year and 
 GCC/CLANG | C++20\
 `make -j$(nproc)`
 ```txt
- ./organizor -h                                                                                                                   10:19:31 PM
-Usage: ./organizor [options]
+ ./organizor -h                                                                                                                 Usage: ./organizor [options]
 
 Organize files in the source directory (top-level only).
 
 Modes (choose one):
-  (default)   <ext>/<file>
-  --year      <ext>/<year>/<file>
-  --month     <ext>/<year>/<month>/<file>   (implies --year)
-  --time      <year>/<month>/<file>         (no extension dir)
-  --time --year   <year>/<file>             (year only, no ext)
+  (default)          <ext>/<file>
+  --year             <ext>/<year>/<file>
+  --month            <ext>/<year>/<month>/<file>   (implies --year)
+  --day              <ext>/<year>/<month>/<day>/<file>
+                     (implies --year and --month)
+  --time             <year>/<month>/<file>   (no extension dir)
+  --time --year      <year>/<file>
+  --time --day       <year>/<month>/<day>/<file>
 
 Options:
   -t                     Explicit type-only mode (same as default).
       --year             Include year directory.
       --month            Include year and month directories.
+      --day              Include year, month and day directories.
       --time             Date-only layout (drops extension dir).
   -e <ext>               Only process this extension (repeatable).
                          Dot optional, case-insensitive (e.g. -e jpg).
