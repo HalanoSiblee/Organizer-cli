@@ -1,7 +1,5 @@
 # Organizer-cli
 
-<< ============================= <img src="logo.webp" width="128"/> ============================= >>
-
 Fast filesystem time base organizer, it move files based on time month year and extension
 
 ## Build
