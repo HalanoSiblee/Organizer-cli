@@ -83,11 +83,12 @@ static bool glob_match(std::string_view pat, std::string_view s) {
     return p == pat.size();
 }
 
-struct YM {
+struct YMD {
     int year;
     unsigned month;
+    unsigned day;
 };
-static YM local_ym(fs::file_time_type ft) {
+static YMD local_ymd(fs::file_time_type ft) {
     using namespace std::chrono;
     static const auto file_now = fs::file_time_type::clock::now();
     static const auto sys_now = system_clock::now();
@@ -101,7 +102,7 @@ static YM local_ym(fs::file_time_type ft) {
     localtime_r( &t, &tm);
 #endif
     return {
-        tm.tm_year + 1900, static_cast<unsigned>(tm.tm_mon + 1)
+        tm.tm_year + 1900, static_cast<unsigned>(tm.tm_mon + 1), static_cast<unsigned>(tm.tm_mday)
     };
 }
 
@@ -158,6 +159,7 @@ static bool is_dangerous_dir(const fs::path & p) {
 struct Options {
     bool do_year = false;
     bool do_month = false;
+    bool do_day = false;
     bool do_time = false;
     bool dry_run = false;
     bool verbose = false;
@@ -173,15 +175,22 @@ struct Options {
     std::vector<std::string> exclude_globs;
 };
 struct Layout {
-    bool inc_ext;
-    bool inc_year;
-    bool inc_month;
+    bool inc_ext = false;
+    bool inc_year = false;
+    bool inc_month = false;
+    bool inc_day = false;
 };
 static Layout derive_layout(const Options & o) {
+    int depth = 0;
+    if (o.do_year)depth = std::max(depth, 1);
+    if (o.do_month)depth = std::max(depth, 2);
+    if (o.do_day)depth = std::max(depth, 3);
+    if (depth == 0 && o.do_time)depth = 2;
     Layout L;
     L.inc_ext = !o.do_time;
-    L.inc_year = o.do_year || o.do_month || o.do_time;
-    L.inc_month = o.do_month || (o.do_time && !o.do_year);
+    L.inc_year = depth >= 1;
+    L.inc_month = depth >= 2;
+    L.inc_day = depth >= 3;
     return L;
 }
 
@@ -190,14 +199,17 @@ static std::string layout_desc(const Layout & L) {
     if (L.inc_ext)s += "<ext>/";
     if (L.inc_year) {
         s += "<year>/";
-        if (L.inc_month)s += "<month>/";
+        if (L.inc_month) {
+            s += "<month>/";
+            if (L.inc_day)s += "<day>/";
+        }
     }
     s += "<file>";
     return s;
 }
 
 static void print_usage(const char *argv0) {
-    std::cout << "Usage: " << argv0 << " [options]\n\n" << "Organize files in the source directory (top-level only).\n\n" << "Modes (choose one):\n" << "  (default)   <ext>/<file>\n" << "  --year      <ext>/<year>/<file>\n" << "  --month     <ext>/<year>/<month>/<file>   (implies --year)\n" << "  --time      <year>/<month>/<file>         (no extension dir)\n" << "  --time --year   <year>/<file>             (year only, no ext)\n\n" << "Options:\n" << "  -t                     Explicit type-only mode (same as default).\n" << "      --year             Include year directory.\n" << "      --month            Include year and month directories.\n" << "      --time             Date-only layout (drops extension dir).\n" << "  -e <ext>               Only process this extension (repeatable).\n" << "                         Dot optional, case-insensitive (e.g. -e jpg).\n" << "      --exclude <glob>   Skip filenames matching glob (repeatable).\n" << "      --no-skip-lists    Do not apply built-in skip extensions/names.\n" << "      --source <dir>     Where to read files from (default: CWD).\n" << "      --target <dir>     Where to build the organized tree (default: source).\n" << "      --output <dir>     Alias for --target.\n" << "  -n, --dry-run          Show what would happen; move nothing.\n" << "  -v, --verbose          Log every move.\n" << "  -q, --quiet            Suppress summary and confirmation prompt.\n" << "  -y, --yes              Skip the interactive confirmation.\n" << "      --force            Bypass the root/danger-path safety guard.\n" << "      --no-lowercase-ext Keep original extension case in dir name.\n" << "  -h, --help             Show this help.\n";
+    std::cout << "Usage: " << argv0 << " [options]\n\n" << "Organize files in the source directory (top-level only).\n\n" << "Modes (choose one):\n" << "  (default)          <ext>/<file>\n" << "  --year             <ext>/<year>/<file>\n" << "  --month            <ext>/<year>/<month>/<file>   (implies --year)\n" << "  --day              <ext>/<year>/<month>/<day>/<file>\n" << "                     (implies --year and --month)\n" << "  --time             <year>/<month>/<file>   (no extension dir)\n" << "  --time --year      <year>/<file>\n" << "  --time --day       <year>/<month>/<day>/<file>\n\n" << "Options:\n" << "  -t                     Explicit type-only mode (same as default).\n" << "      --year             Include year directory.\n" << "      --month            Include year and month directories.\n" << "      --day              Include year, month and day directories.\n" << "      --time             Date-only layout (drops extension dir).\n" << "  -e <ext>               Only process this extension (repeatable).\n" << "                         Dot optional, case-insensitive (e.g. -e jpg).\n" << "      --exclude <glob>   Skip filenames matching glob (repeatable).\n" << "      --no-skip-lists    Do not apply built-in skip extensions/names.\n" << "      --source <dir>     Where to read files from (default: CWD).\n" << "      --target <dir>     Where to build the organized tree (default: source).\n" << "      --output <dir>     Alias for --target.\n" << "  -n, --dry-run          Show what would happen; move nothing.\n" << "  -v, --verbose          Log every move.\n" << "  -q, --quiet            Suppress summary and confirmation prompt.\n" << "  -y, --yes              Skip the interactive confirmation.\n" << "      --force            Bypass the root/danger-path safety guard.\n" << "      --no-lowercase-ext Keep original extension case in dir name.\n" << "  -h, --help             Show this help.\n";
 }
 
 static bool parse_args(int argc, char * *argv, Options & o, std::string & err) {
@@ -213,10 +225,9 @@ static bool parse_args(int argc, char * *argv, Options & o, std::string & err) {
         std::string_view a = argv[i];
         if (a == "-t") {
         } else if (a == "--year")o.do_year = true;
-        else if (a == "--month") {
-            o.do_year = true;
-            o.do_month = true;
-        } else if (a == "--time")o.do_time = true;
+        else if (a == "--month")o.do_month = true;
+        else if (a == "--day")o.do_day = true;
+        else if (a == "--time")o.do_time = true;
         else if (a == "-n" || a == "--dry-run")o.dry_run = true;
         else if (a == "-v" || a == "--verbose")o.verbose = true;
         else if (a == "-q" || a == "--quiet")o.quiet = true;
@@ -353,7 +364,7 @@ int main(int argc, char * *argv) {
     }
     Stats st;
     std::error_code iter_ec;
-    std::string last_ext, last_year, last_month;
+    std::string last_ext, last_year, last_month, last_day;
     fs::path last_parent;
     fs::directory_iterator it(opt.source, fs::directory_options::skip_permission_denied, iter_ec);
     if (iter_ec) {
@@ -418,28 +429,33 @@ int main(int argc, char * *argv) {
                 last_ext = ext_dir;
                 last_year.clear();
                 last_month.clear();
+                last_day.clear();
                 last_parent = parent;
             }
         } else {
-            YM ym = local_ym(entry.last_write_time(e));
+            YMD ymd = local_ymd(entry.last_write_time(e));
             if (e) {
                 log_error(path, e);
                 ++st.errors;
                 continue;
             }
-            std::string year = std::to_string(ym.year);
-            std::string month = L.inc_month ? two_digits(ym.month) : std::string {
+            std::string year = std::to_string(ymd.year);
+            std::string month = L.inc_month ? two_digits(ymd.month) : std::string {
             };
-            if (ext_dir == last_ext && year == last_year && month == last_month && !last_parent.empty()) {
+            std::string day = L.inc_day ? two_digits(ymd.day) : std::string {
+            };
+            if (ext_dir == last_ext && year == last_year && month == last_month && day == last_day && !last_parent.empty()) {
                 parent = last_parent;
             } else {
                 parent = base;
                 if (L.inc_ext)parent /= ext_dir;
                 parent /= year;
                 if (L.inc_month)parent /= month;
+                if (L.inc_day)parent /= day;
                 last_ext = ext_dir;
                 last_year = year;
                 last_month = month;
+                last_day = day;
                 last_parent = parent;
             }
         }
